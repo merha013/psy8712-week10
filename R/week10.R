@@ -4,23 +4,23 @@ library(haven)
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
 # Data Import and Cleaning
-data <- read_sav("./data/GSS2016.sav")
+data <- read_sav("../data/GSS2016.sav")
+  ## 'user_na=FALSE' is the default. So, I didn't add it. It ensures any 
+  ## missing, don’t know, inapplicable, or otherwise not-clearly-answered 
+  ## items are marked as missing values.
 
 gss_tbl <- data %>%
-  ## 'user_na=FALSE' is the default. It ensures any missing, don’t know, 
-  ## inapplicable, or otherwise not-clearly-answered items are marked as 
-  ## missing values. 
   mutate_all(~ifelse(.==0, NA, .)) %>%  # turns the 0s into NAs
-  ##### the filter() code is not working properly for me :(
+  ##### the filter() code below is not working properly for me :(
   # filter(!is.na(MOSTHRS)) %>%  # removes anyone with NA in MOSTHRS
-  rename("work hours" = MOSTHRS) %>%  # changes MOSTHRS label to work hours
+  rename(work_hours = MOSTHRS) %>%  # changes MOSTHRS label to work_hours
   select(-c(HRS1, HRS2)) %>%  # removes HRS1 and HRS2 variables
-  select(-where(~ mean(is.na(.))<.75))  ## retains only variables < 75% NAs
+  select(-where(~ mean(is.na(.))<.75))  # retains only variables w/ < 75% NAs
 
 # check data upload...
 names(gss_tbl)
 colMeans(is.na(gss_tbl)) < .75
-View(gss_tbl$"work hours")  ## rather than removing the NAs in MOSTHRS, it is 
+View(gss_tbl$work_hours)  ## rather than removing the NAs in MOSTHRS, it is 
   ## completely removing the whole column :(
 
 if (any(gss_tbl==0, na.rm = TRUE)) {
@@ -29,7 +29,7 @@ if (any(gss_tbl==0, na.rm = TRUE)) {
   print("There are no 0s in the dataset.")
 }
 
-if (any(gss_tbl$"work hours"==NA, na.rm = TRUE)) {
+if (any(gss_tbl$work_hours==NA, na.rm = TRUE)) {
   print("There are NAs in the dataset.")
 } else {
   print("There are no NAs in the dataset.")
@@ -44,8 +44,8 @@ if (any(colMeans(is.na(gss_tbl)) < .75, na.rm = TRUE)) {
 # Visualization
 ## includes a visualization of the univariate distribution of work hours
 gss_tbl %>%
-  ggplot(aes(x="work hours")) +
-  geom_histogram(binwidth = 5, fill = "gold", color = "maroon") +
+  ggplot(aes(x=work_hours)) +
+  geom_histogram(binwidth = 5, fill = "gray", color = "darkblue") +
   labs(title = "Distribution of Work Hours",
        x = "Work Hours",
        y = "Frequency") +
