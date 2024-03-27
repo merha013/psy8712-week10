@@ -11,8 +11,9 @@ data <- read_sav("../data/GSS2016.sav")
 
 gss_tbl <- data %>%
   mutate_all(~ifelse(.==0, NA, .)) %>%  # turns the 0s into NAs
-  ##### the filter() code below is not working properly for me :(
+  ##### the filter() and drop_na() code below are completely removing MOSTHRS
   # filter(!is.na(MOSTHRS)) %>%  # removes anyone with NA in MOSTHRS
+  # drop_na(MOSTHRS) %>%
   rename(work_hours = MOSTHRS) %>%  # changes MOSTHRS label to work_hours
   select(-c(HRS1, HRS2)) %>%  # removes HRS1 and HRS2 variables
   select(-where(~ mean(is.na(.))<.75))  # retains only variables w/ < 75% NAs
