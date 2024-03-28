@@ -4,7 +4,6 @@ library(haven)
 library(caret)
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
-
 # Data Import and Cleaning
 gss_tbl <- read_sav("../data/GSS2016.sav") %>%
   mutate_all(~ifelse(.==0, NA, .)) %>%  # turns the 0s into NAs
@@ -13,7 +12,6 @@ gss_tbl <- read_sav("../data/GSS2016.sav") %>%
   select(-c(HRS1, HRS2)) %>%   # removes HRS1 and HRS2 variables
   select(-where(~mean(is.na(.))>.75)) %>%  # retains only variables w/ < 75% NAs
   mutate_all(as.numeric) # I was getting errors that the data wasn't usable.
-
 
 # Visualization
 gss_tbl %>%
@@ -24,8 +22,8 @@ gss_tbl %>%
        y = "Frequency") +
   theme_bw()
 
-
-# Analysis... The Analysis section will contain one executable line in total: a loop iterating through the items contained within that vector or tibble
+# Analysis
+#... The Analysis section will contain one executable line in total: a loop iterating through the items contained within that vector or tibble
 
 ## split the dataset into two tibbles, train and holdout
 rows <- sample(nrow(gss_tbl)) # Shuffle row indices
@@ -39,14 +37,30 @@ myControl <- trainControl(method = "cv", # cross-validation
                           number = 10, # 10 fold cv
                           search = "grid",
                           verboseIter = T) # prints additional details
-
+                          
 ## define preProcess for all models
-myProcess <- c("center", "scale", "medianImpute")
-  ## uses median imputation to impute any remaining missing values
+myProcess <- c("center", "scale", "medianImpute") # imputes missing values
 
-## define tuneGrid for all models, ifelse() to try a loop
-# myGrid <- 
-  
+## define tuneGrid for all models
+# myGrid <- combine below into if()else()
+ols_grid <- NULL # tuning parameters: intercept only. No tuneGrid needed.
+enet_grid <- expand.grid( # tuning parameters: alpha, lambda.
+  alpha = c(0, 1), #0=LASSO, 1=ridge 
+  lambda = seq(0.0001, 0.1, length = 20)) # complexity penalties
+rf_grid <- data.frame(  # tuning parameters: mtry, splitrule, min.node.size.
+  mtry = c(2, 3, 4, 5, 10, 20, 50, 100), # tuneLength changes mtry
+  splitrule = c("variance"),
+  min.node.size = 5)
+xgb_grid <- expand.grid( # tuning parameters: nrounds, max_depth, eta, 
+  ## gamma, subsample, colsample_bytree, min_child_weight.
+  nrounds = c(2, 5, 10), # boosting iterations
+  max_depth = c(2, 5, 10), # max tree depth
+  eta = seq(0, 1, length = 10), # shrinkage
+  gamma = 0, # minimum loss reduction
+  colsample_bytree = 1, # subsample ratio of columns
+  min_child_weight = c(1, 2, 3), # min sum of instance weight
+  subsample = 1) # subsample percentage
+
 
 ## run the OLS regression model, "lm"
 set.seed(8712) # so I get reproducible results
@@ -57,13 +71,13 @@ olsmodel <- train(
   preProcess = myProcess,
   na.action = na.pass,
   tuneLength = 10, # tries 10 diff values f/each tuning parameter in model.
-  trControl = myControl
-  # tuning parameters: intercept only. No tuneGrid needed.
+  trControl = myControl,
+  tuneGrid = ols_grid 
   )
 olsmodel # prints model to console
 
 ### test the OLS regression model
-results_olsmodel <- olsmodel$results # results: 362.8577 RMSE
+(results_olsmodel <- olsmodel$results) # results: 362.8577 RMSE
 olsmodel$bestTune # result: intercept = TRUE
 (olsmodel_cv_rsq <- olsmodel$results$Rsquared)
 
@@ -92,17 +106,13 @@ enetmodel <- train(
   na.action = na.pass,
   tuneLength = 10, # tries 10 diff values f/each tuning parameter in model.
   trControl = myControl,
-  ## tuning parameters: alpha, lambda.
-  tuneGrid = expand.grid(
-    alpha = 0:1, 
-    lambda = seq(0.0001, 1, length = 20))
-  )
+  tuneGrid = enet_grid)
 enetmodel # prints model to console
 
 ### test the elastic net model
 results_enetmodel <- enetmodel$results
 enetmodel$bestTune # result: alpha = 1, lambda = 0.7368684
-(enetmodel_cv_rsq <- max(enetmodel$results$Rsquared))
+(enetmodel_cv_rsq <- max(enetmodel$results$Rsquared, na.rm = TRUE))
 
 ### predict on holdout set (test_tbl)
 p_enetmodel <- predict(enetmodel, test_tbl, na.action=na.pass)
@@ -126,19 +136,14 @@ rfmodel <- train(
   na.action = na.pass,
   tuneLength = 10, # tries 10 diff values f/each tuning parameter in model.
   trControl = myControl,
-  ## tuning parameters: mtry, splitrule, min.node.size.
-  tuneGrid = data.frame(
-    mtry = c(2, 3, 4, 5, 10, 20, 50, 100),
-    splitrule = c("variance"),
-    min.node.size = 5)
-  )
+  tuneGrid = rf_grid)
 rfmodel # prints model to console
 plot(rfmodel) # plot model
 
 ### test the random forest model
 results_rfmodel <- rfmodel$results
 rfmodel$bestTune # result: mtry = 100
-(rfmodel_cv_rsq <- max(rfmodel$results$Rsquared))
+(rfmodel_cv_rsq <- max(rfmodel$results$Rsquared, na.rm = TRUE))
 
 ### predict on holdout set (test_tbl)
 p_rfmodel <- predict(rfmodel, test_tbl, na.action=na.pass)
@@ -153,36 +158,24 @@ RMSE_rfmodel.f <- sqrt(mean(error_rfmodel.f^2)) # 23.13059
 (rfmodel_f_rsq <- cor(p_rfmodel.f, gss_tbl$work_hours)^2)
 
 
-## run the “eXtreme Gradient Boosting” model, "xgbDART"
+## run the “eXtreme Gradient Boosting” model, "xgbTree"
 set.seed(8712) # so I get reproducible results
 xgbmodel <- train(
   work_hours ~ .,
   train_tbl,
-  method = "xgbDART", # or "xgbTREE"
+  method = "xgbTree", # this is the traditional tree-based boosting algorithm
   preProcess = myProcess,
   na.action = na.pass,
   tuneLength = 10, # tries 10 diff values f/each tuning parameter in model.
   trControl = myControl,
-  ## tuning parameters: nrounds, max_depth, eta, gamma, subsample, 
-  ## colsample_bytree, -rate_drop, -skip_drop, min_child_weight.
-  tuneGrid = expand.grid(
-    nrounds = c(2, 5, 10), # boosting iterations
-    max_depth = c(2, 5, 10), # max tree depth
-    eta = seq(0, 1, length = 10), # shrinkage
-    gamma = 0, # minimum loss reduction
-    subsample = 1, # subsample percentage
-    colsample_bytree = 1, # subsample ratio of columns
-    rate_drop = 0, # fraction of trees dropped
-    skip_drop = 0, # prob. of skipping drop-out
-    min_child_weight = c(1, 2, 3)) # min sum of instance weight
-  )
+  tuneGrid = xgb_grid)
 xgbmodel # prints model to console
 plot(xgbmodel) # plot model
 
 ### test the "eXtreme Gradient Boosting" model
 xgbmodel$results
 xgbmodel$bestTune # results: nrounds = 10, max_depth = 2, eta = 0.44, m_c_w = 3
-(xgbmodel_cv_rsq <- max(xgbmodel$results$Rsquared))
+(xgbmodel_cv_rsq <- max(xgbmodel$results$Rsquared, na.rm = TRUE))
 
 ### predict on holdout set (test_tbl)
 p_xgbmodel <- predict(xgbmodel, test_tbl, na.action=na.pass)
@@ -204,7 +197,6 @@ summary(resamples(list(olsmodel, enetmodel, rfmodel, xgbmodel)))
 dotplot(resamples(list( # removed olsmodel because it was so different
   enetmodel, rfmodel, xgbmodel), metric = "ROC"))
 
-
   
 # Publication
 table1_tbl <- tibble(
@@ -212,22 +204,22 @@ table1_tbl <- tibble(
            "elastic net", 
            "random forest", 
            "eXtreme Gradient Boosting"),
-  cv_rsq = c(
-    str_remove(formatC(olsmodel_cv_rsq, format = 'f', digits = 2), "^0",),
-    str_remove(formatC(enetmodel_cv_rsq, format = 'f', digits = 2), "^0",),
-    str_remove(formatC(rfmodel_cv_rsq, format = 'f', digits = 2), "^0",),
-    str_remove(formatC(xgbmodel_cv_rsq, format = 'f', digits = 2), "^0",)),
-  ho_rsq = c(olsmodel_ho_rsq, 
-             enetmodel_ho_rsq, 
-             rfmodel_ho_rsq, 
-             xgbmodel_ho_rsq)
+  cv_rsq = c( # round all values to 2 decimal places & with no leading zero
+    str_remove(formatC(olsmodel_cv_rsq, format = 'f', digits = 2), "^0"),
+    str_remove(formatC(enetmodel_cv_rsq, format = 'f', digits = 2), "^0"),
+    str_remove(formatC(rfmodel_cv_rsq, format = 'f', digits = 2), "^0"),
+    str_remove(formatC(xgbmodel_cv_rsq, format = 'f', digits = 2), "^0")),
+  ho_rsq = c( # round all values to 2 decimal places & with no leading zero
+    str_remove(formatC(olsmodel_ho_rsq, format = 'f', digits = 2), "^0"),
+    str_remove(formatC(enetmodel_ho_rsq, format = 'f', digits = 2), "^0"),
+    str_remove(formatC(rfmodel_ho_rsq, format = 'f', digits = 2), "^0"),
+    str_remove(formatC(xgbmodel_ho_rsq, format = 'f', digits = 2), "^0")
   )
-table1_tbl
+)
+table1_tbl # prints the table
 
-str_remove(formatC(analysis$p.value, format='f', digits=2), "^0")
+## Questions
 
-## Round all values to 2 decimal places in this tibble and display them without leading zeros and to the hundredths place
-  
 # 1. How did your results change between models? Why do you think this happened, specifically?
 
 # 2. How did your results change between k-fold CV and holdout CV? Why do you think this happened, specifically?
