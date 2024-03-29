@@ -120,27 +120,13 @@ for (model_name in names(results)) {
 
 
 # Questions
-## 1. How did your results change between models? Why do you think this happened, specifically?
-results_enetmodel <- enetmodel$results
-enetmodel$bestTune # result: alpha = 1, lambda = 0.7368684
 
+## 1. How did your results change between models? Why do you think this happened, specifically?
+### OLS Regression was a very poor fit. When comparing the output directly via summary(resamples(list(model1, model2, model3, model4))), I even removed the OLS model because it was so much worse than the other three. Clearly, using linear regression for this dataset would not be ideal for making predictions. As for the other three models, differences could be due to model complexity, underlying assumptions, and hyperparameter tuning (which I could have continually tweaked for a long time). Or, it could be a problem with the data quality and/or quantity.  
 
 # 2. How did your results change between k-fold CV and holdout CV? Why do you think this happened, specifically?
-(results_olsmodel <- olsmodel$results) # results: 362.8577 RMSE
-olsmodel$bestTune # result: intercept = TRUE
-p_olsmodel <- predict(olsmodel, test_tbl, na.action=na.pass) 
-error_olsmodel <- p_olsmodel-test_tbl[["work_hours"]]
-RMSE_olsmodel <- sqrt(mean(error_olsmodel^2)) # 718.7421 RMSE
-
-RMSE_enetmodel <- sqrt(mean(error_enetmodel^2)) # 13.17391
-RMSE_enetmodel.f <- sqrt(mean(error_enetmodel.f^2)) # 10.28183
-
-RMSE_rfmodel <- sqrt(mean(error_rfmodel^2)) # 13.80708
-
-RMSE_xgbmodel <- sqrt(mean(error_xgbmodel^2)) # 22.37695
-
-
-## Test set RMSE is higher than the training set RMSE because we overfit the 
-## training set, and the test set contains data the model hasn't seen before.
+### The R-squared decreased in the holdout CV because it was predicting on data that it hadn't previously seen before. Additionally, the RMSE value was significantly higher on the holdout CV (718.74 vs. 362.86) for "lm" because the training set was overfit.
 
 # 3. Among the four models, which would you choose for a real-life prediction problem, and why? Are there tradeoffs? Write up to a paragraph.
+### Based on the R-squared values, I would use the eXtreme Gradient Boosting for a real0life prediction problem based on this data. The pros for "xgbTree" include: high performance, scalability, flexibility, and feature importance scores showing which features are most influential in makign predictions. However, the cons include: complexity, sensitivity to hyperparameters, and significant training time for large datasets and complex models. Additionally, "xgbTree" can be considered a black-box model, where it is difficult to understand and interpret the relationship between input features and predictions. 
+### Random Forest could also be a good model to select as it tends to have high accuracy, robustness to overfitting, and its ability to handle missing values and outlines. However, if we had used the full original dataset (including the large quantity of missing values), it might have done worse since it is less effective on sparse data. Otherwise, it has similar cons as "xgbTree": black box model, bias in feature importance, and somputational resources.
