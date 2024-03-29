@@ -61,6 +61,44 @@ xgb_grid <- expand.grid( # tuning parameters: nrounds, max_depth, eta,
   min_child_weight = c(1, 2, 3), # min sum of instance weight
   subsample = 1) # subsample percentage
 
+## Define models
+models <- list(
+  "OLS Regression" = list(method = "lm", tuneGrid = ols_grid),
+  "Elastic Net" = list(method = "glmnet", tuneGrid = enet_grid),
+  "Random Forest" = list(method = "ranger", tuneGrid = rf_grid),
+  "eXtreme Gradient Boosting" = list(method = "xgbTree", tuneGrid = xgb_grid))
+
+## Loop over models
+results <- list()
+for (model_name in names(models)) {
+  set.seed(8712) # for reproducibility
+  model <- train(
+    work_hours ~ .,
+    train_tbl,
+    method = models[[model_name]]$method,
+    preProcess = myProcess,
+    na.action = na.pass,
+    tuneLength = 10,
+    trControl = myControl,
+    tuneGrid = models[[model_name]]$tuneGrid)
+  # Save model results
+  results[[model_name]] <- list(
+    cv_rsq = max(model$results$Rsquared, na.rm = TRUE),
+    model = model)
+  # Predict on holdout set
+  predictions <- predict(model, test_tbl, na.action = na.pass)
+  error <- predictions - test_tbl$work_hours
+  results[[model_name]]$ho_rsq <- cor(predictions, test_tbl$work_hours)^2
+}
+
+## Print results
+for (model_name in names(results)) {
+  cat("Model:", model_name, "\n")
+  cat("CV R-squared:", results[[model_name]]$cv_rsq, "\n")
+  cat("Holdout R-squared:", results[[model_name]]$ho_rsq, "\n\n")
+}
+
+#####################################
 
 ## run the OLS regression model, "lm"
 set.seed(8712) # so I get reproducible results
@@ -74,26 +112,13 @@ olsmodel <- train(
   trControl = myControl,
   tuneGrid = ols_grid 
   )
-olsmodel # prints model to console
 
 ### test the OLS regression model
-(results_olsmodel <- olsmodel$results) # results: 362.8577 RMSE
-olsmodel$bestTune # result: intercept = TRUE
-(olsmodel_cv_rsq <- olsmodel$results$Rsquared)
-
+(olsmodel_cv_rsq <- olsmodel$results$Rsquared) # R-sqrd value
 ### predict on holdout set (test_tbl)
 p_olsmodel <- predict(olsmodel, test_tbl, na.action=na.pass) 
 error_olsmodel <- p_olsmodel-test_tbl[["work_hours"]]
-RMSE_olsmodel <- sqrt(mean(error_olsmodel^2)) # 718.7421 RMSE
-  ## Test set RMSE is higher than the training set RMSE because we overfit the 
-  ## training set, and the test set contains data the model hasn't seen before.
 (olsmodel_ho_rsq <- cor(p_olsmodel, test_tbl$work_hours)^2)
-
-### predict on full gss_tbl
-p_olsmodel.f <- predict(olsmodel, gss_tbl, na.action=na.pass)
-error_olsmodel.f <- p_olsmodel.f-gss_tbl[["work_hours"]]
-RMSE_olsmodel.f <- sqrt(mean(error_olsmodel.f^2)) # 358.74 RMSE
-(olsmodel_f_rsq <- cor(p_olsmodel.f, gss_tbl$work_hours)^2)
 
 
 ## run the elastic net model, "glmnet"
@@ -110,21 +135,12 @@ enetmodel <- train(
 enetmodel # prints model to console
 
 ### test the elastic net model
-results_enetmodel <- enetmodel$results
-enetmodel$bestTune # result: alpha = 1, lambda = 0.7368684
-(enetmodel_cv_rsq <- max(enetmodel$results$Rsquared, na.rm = TRUE))
-
+(enetmodel_cv_rsq <- max(enetmodel$results$Rsquared, na.rm = TRUE)) # R-sqrd
 ### predict on holdout set (test_tbl)
 p_enetmodel <- predict(enetmodel, test_tbl, na.action=na.pass)
 error_enetmodel <- p_enetmodel-test_tbl[["work_hours"]]
-RMSE_enetmodel <- sqrt(mean(error_enetmodel^2)) # 13.17391
 (enetmodel_ho_rsq <- cor(p_enetmodel, test_tbl$work_hours)^2)
 
-### predict on full gss_tbl
-p_enetmodel.f <- predict(enetmodel, gss_tbl, na.action=na.pass)
-error_enetmodel.f <- p_enetmodel.f-gss_tbl[["work_hours"]]
-RMSE_enetmodel.f <- sqrt(mean(error_enetmodel.f^2)) # 10.28183
-(emetmodel_f_rsq <- cor(p_enetmodel.f, gss_tbl$work_hours)^2)
 
 ## run the random forest model, "ranger"
 set.seed(8712) # so I get reproducible results
@@ -141,22 +157,11 @@ rfmodel # prints model to console
 plot(rfmodel) # plot model
 
 ### test the random forest model
-results_rfmodel <- rfmodel$results
-rfmodel$bestTune # result: mtry = 100
 (rfmodel_cv_rsq <- max(rfmodel$results$Rsquared, na.rm = TRUE))
-
 ### predict on holdout set (test_tbl)
 p_rfmodel <- predict(rfmodel, test_tbl, na.action=na.pass)
 error_rfmodel <- p_rfmodel-test_tbl[["work_hours"]]
-RMSE_rfmodel <- sqrt(mean(error_rfmodel^2)) # 13.80708
 (rfmodel_ho_rsq <- cor(p_rfmodel, test_tbl$work_hours)^2)
-
-### predict on full gss_tbl
-p_rfmodel.f <- predict(rfmodel, gss_tbl, na.action=na.pass)
-error_rfmodel.f <- p_rfmodel.f-test_tbl[["work_hours"]]
-RMSE_rfmodel.f <- sqrt(mean(error_rfmodel.f^2)) # 23.13059
-(rfmodel_f_rsq <- cor(p_rfmodel.f, gss_tbl$work_hours)^2)
-
 
 ## run the “eXtreme Gradient Boosting” model, "xgbTree"
 set.seed(8712) # so I get reproducible results
@@ -173,21 +178,11 @@ xgbmodel # prints model to console
 plot(xgbmodel) # plot model
 
 ### test the "eXtreme Gradient Boosting" model
-xgbmodel$results
-xgbmodel$bestTune # results: nrounds = 10, max_depth = 2, eta = 0.44, m_c_w = 3
 (xgbmodel_cv_rsq <- max(xgbmodel$results$Rsquared, na.rm = TRUE))
-
 ### predict on holdout set (test_tbl)
 p_xgbmodel <- predict(xgbmodel, test_tbl, na.action=na.pass)
 error_xgbmodel <- p_xgbmodel-test_tbl[["work_hours"]]
-RMSE_xgbmodel <- sqrt(mean(error_xgbmodel^2)) # 22.37695
 (xgbmodel_ho_rsq <- cor(p_xgbmodel, test_tbl$work_hours)^2)
-
-### predict on full gss_tbl
-p_xgbmodel.f <- predict(xgbmodel, gss_tbl, na.action=na.pass)
-error_xgbmodel.f <- p_xgbmodel.f-test_tbl[["work_hours"]]
-RMSE_xgbmodel.f <- sqrt(mean(error_xgbmodel.f^2)) # 22.37695
-(xgbmodel_f_rsq <- cor(p_xgbmodel.f, gss_tbl$work_hours)^2)
 
 
 # use resamples() to compare output directly
@@ -221,7 +216,26 @@ table1_tbl # prints the table
 ## Questions
 
 # 1. How did your results change between models? Why do you think this happened, specifically?
+results_enetmodel <- enetmodel$results
+enetmodel$bestTune # result: alpha = 1, lambda = 0.7368684
+
 
 # 2. How did your results change between k-fold CV and holdout CV? Why do you think this happened, specifically?
+(results_olsmodel <- olsmodel$results) # results: 362.8577 RMSE
+olsmodel$bestTune # result: intercept = TRUE
+p_olsmodel <- predict(olsmodel, test_tbl, na.action=na.pass) 
+error_olsmodel <- p_olsmodel-test_tbl[["work_hours"]]
+RMSE_olsmodel <- sqrt(mean(error_olsmodel^2)) # 718.7421 RMSE
+
+RMSE_enetmodel <- sqrt(mean(error_enetmodel^2)) # 13.17391
+RMSE_enetmodel.f <- sqrt(mean(error_enetmodel.f^2)) # 10.28183
+
+RMSE_rfmodel <- sqrt(mean(error_rfmodel^2)) # 13.80708
+
+RMSE_xgbmodel <- sqrt(mean(error_xgbmodel^2)) # 22.37695
+
+
+## Test set RMSE is higher than the training set RMSE because we overfit the 
+## training set, and the test set contains data the model hasn't seen before.
 
 # 3. Among the four models, which would you choose for a real-life prediction problem, and why? Are there tradeoffs? Write up to a paragraph.
