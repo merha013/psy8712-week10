@@ -11,7 +11,7 @@ gss_tbl <- read_sav("../data/GSS2016.sav") %>%
   drop_na(MOSTHRS) %>%  # removes anyone with NA in MOSTHRS
   rename(work_hours = MOSTHRS) %>%   # changes MOSTHRS label to work_hours
   select(-c(HRS1, HRS2)) %>%   # removes HRS1 and HRS2 variables
-  select(-where(~mean(is.na(.))>.75)) %>%  # retains only variables w/ < 75% NAs
+  select(-where(~mean(is.na(.))>.75)) %>%  # retains variables w/ < 75% NAs
   mutate_all(as.numeric) # I was getting errors that the data wasn't usable.
 
 # Visualization
@@ -24,41 +24,48 @@ gss_tbl %>%
   theme_bw()
 
 # Analysis
-#### I still need to turn the tuneGrid and models into ifelse inside the loop.
-## Define tuneGrid for all models
-ols_grid <- NULL # tuning parameters: intercept only. No tuneGrid needed.
-enet_grid <- expand.grid( # tuning parameters: alpha, lambda.
-  alpha = c(0, 1), #0=LASSO, 1=ridge 
-  lambda = seq(0.0001, 0.1, length = 20) # complexity penalties
-  )
-rf_grid <- data.frame(  # tuning parameters: mtry, splitrule, min.node.size.
-  mtry = c(2, 3, 4, 5, 10, 20, 50, 100), # tuneLength changes mtry
-  splitrule = c("variance"),
-  min.node.size = 5
-  )
-xgb_grid <- expand.grid( # tuning parameters: nrounds, max_depth, eta, 
-  ## gamma, subsample, colsample_bytree, min_child_weight.
-  nrounds = c(2, 5, 10), # boosting iterations
-  max_depth = c(2, 5, 10), # max tree depth
-  eta = seq(0, 1, length = 10), # shrinkage
-  gamma = 0, # minimum loss reduction
-  colsample_bytree = 1, # subsample ratio of columns
-  min_child_weight = c(1, 2, 3), # min sum of instance weight
-  subsample = 1  # subsample percentage
-  )
-
-## Define models outside the loop
-models <- list(
-  "OLS Regression" = list(method = "lm", tuneGrid = ols_grid),
-  "Elastic Net" = list(method = "glmnet", tuneGrid = enet_grid),
-  "Random Forest" = list(method = "ranger", tuneGrid = rf_grid),
-  "eXtreme Gradient Boosting" = list(method = "xgbTree", tuneGrid = xgb_grid)
-  )
-
-## Loop over all four models
+## Loop over all four models at once
 results <- list()
-for (model_name in names(models)) {
+for (model_name in c("OLS Regression", "Elastic Net",
+                     "Random Forest", "eXtreme Gradient Boosting")) {
   set.seed(8712) # for reproducibility
+  
+  # Define method for all models
+  if (model_name == "OLS Regression") {
+    myMethod <- "lm" 
+  } else if (model_name == "Elastic Net") {
+    myMethod <- "glmnet" 
+  } else if (model_name == "Random Forest") {
+    myMethod <- "ranger"
+  } else if (model_name == "eXtreme Gradient Boosting") {
+    myMethod <- "xgbTree"
+  }
+  
+  # Define tuneGrid for all models
+  if (model_name == "OLS Regression") {
+    myGrid <- NULL # tuning parameters: intercept only. No tuneGrid needed.
+  } else if (model_name == "Elastic Net") {
+    myGrid <- expand.grid(
+      alpha = c(0, 1), # 0=LASSO, 1=ridge
+      lambda = seq(0.0001, 0.1, length = 20) # complexity penalties
+    )
+  } else if (model_name == "Random Forest") {
+    myGrid <- data.frame( 
+      mtry = c(2, 3, 4, 5, 10, 20, 50, 100), # tuneLength changes mtry
+      splitrule = c("variance"),
+      min.node.size = 5
+    )
+  } else if (model_name == "eXtreme Gradient Boosting") {
+    myGrid <- expand.grid( 
+      nrounds = c(2, 5, 10), # boosting iterations
+      max_depth = c(2, 5, 10), # max tree depth
+      eta = seq(0, 1, length = 10), # shrinkage
+      gamma = 0, # minimum loss reduction
+      colsample_bytree = 1, # subsample ratio of columns
+      min_child_weight = c(1, 2, 3), # min sum of instance weight
+      subsample = 1 # subsample percentage
+    )
+  }
   
   # Split the dataset into two tibbles, train and holdout
   rows <- sample(nrow(gss_tbl)) # Shuffle row indices
@@ -71,7 +78,7 @@ for (model_name in names(models)) {
   model <- train(
     work_hours ~ .,
     train_tbl,
-    method = models[[model_name]]$method,
+    method = myMethod,
     preProcess = c("center", "scale", "medianImpute"), # imputes missing values
     na.action = na.pass,
     tuneLength = 10,
@@ -79,14 +86,14 @@ for (model_name in names(models)) {
                              number = 10, # 10 fold cv
                              search = "grid",
                              verboseIter = T), # prints additional details
-    tuneGrid = models[[model_name]]$tuneGrid
-    )
+    tuneGrid = myGrid
+  )
   
   # Save model results
   results[[model_name]] <- list(
     model = model,
     cv_rsq = max(model$results$Rsquared, na.rm = TRUE)
-    )
+  )
   
   # Predict on holdout set
   predictions <- predict(model, test_tbl, na.action = na.pass)
@@ -98,8 +105,8 @@ for (model_name in names(models)) {
 ## Initialize table1_tbl as an empty list
 table1_tbl <- tibble(
   algo = character(),
-  cv_rsq = character(),
-  ho_rsq = character()
+  cv_rsq = character(), # because I had to convert it to remove the leading 0
+  ho_rsq = character() # because I had to convert it to remove the leading 0
 )
 
 ## Create the tbl with a loop
@@ -122,11 +129,31 @@ for (model_name in names(results)) {
 # Questions
 
 ## 1. How did your results change between models? Why do you think this happened, specifically?
-### OLS Regression was a very poor fit. When comparing the output directly via summary(resamples(list(model1, model2, model3, model4))), I even removed the OLS model because it was so much worse than the other three. Clearly, using linear regression for this dataset would not be ideal for making predictions. As for the other three models, differences could be due to model complexity, underlying assumptions, and hyperparameter tuning (which I could have continually tweaked for a long time). Or, it could be a problem with the data quality and/or quantity.  
+### OLS Regression was a very poor fit. When comparing the output directly via 
+# summary(resamples(list(model1, model2, model3, model4))), I even removed the 
+# OLS model to get a better look at the other three since it was so much worse 
+# than them. Clearly, using linear regression for this data would not be ideal 
+# for making predictions. As for the other three models, the differences could 
+# be due to model complexity, underlying assumptions, and hyperparameter tuning # (which could have been continually tweaked for a long time). Or, it could 
+# just be a problem with the data quality and/or quantity.  
 
 # 2. How did your results change between k-fold CV and holdout CV? Why do you think this happened, specifically?
-### The R-squared decreased in the holdout CV because it was predicting on data that it hadn't previously seen before. Additionally, the RMSE value was significantly higher on the holdout CV (718.74 vs. 362.86) for "lm" because the training set was overfit.
+### The R-squared decreased in the holdout CV because it was predicting on data # that it hadn't previously seen before. Additionally, the RMSE value was 
+# significantly higher on the holdout CV (718.74 vs. 362.86) for "lm" because 
+# the training set was likely overfit.
 
 # 3. Among the four models, which would you choose for a real-life prediction problem, and why? Are there tradeoffs? Write up to a paragraph.
-### Based on the R-squared values, I would use the eXtreme Gradient Boosting for a real0life prediction problem based on this data. The pros for "xgbTree" include: high performance, scalability, flexibility, and feature importance scores showing which features are most influential in makign predictions. However, the cons include: complexity, sensitivity to hyperparameters, and significant training time for large datasets and complex models. Additionally, "xgbTree" can be considered a black-box model, where it is difficult to understand and interpret the relationship between input features and predictions. 
-### Random Forest could also be a good model to select as it tends to have high accuracy, robustness to overfitting, and its ability to handle missing values and outlines. However, if we had used the full original dataset (including the large quantity of missing values), it might have done worse since it is less effective on sparse data. Otherwise, it has similar cons as "xgbTree": black box model, bias in feature importance, and somputational resources.
+### Based on the R-squared values, I would use the eXtreme Gradient Boosting 
+# for a real0life prediction problem based on this data. The pros for "xgbTree" # include: high performance, scalability, flexibility, and feature importance 
+# scores showing which features are most influential in making predictions. 
+# However, the cons include: complexity, sensitivity to hyperparameters, and 
+# significant training time for large datasets and complex models. 
+# Additionally, "xgbTree" can be considered a black-box model, where it is 
+# difficult to understand and interpret the relationship between input features # and predictions. 
+# Random Forest could also be a good model to select as it tends to have high 
+# accuracy, robustness to overfitting, and an ability to handle missing values 
+# and outlines. However, if we had used the full original dataset (including 
+# the large quantity of missing values), it might have done worse since Random 
+# Forest is less effective on sparse data. Otherwise, it has similar cons as 
+# "xgbTree": black box model, bias in feature importance, and computational 
+# resources.
